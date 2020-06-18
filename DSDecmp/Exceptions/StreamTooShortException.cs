@@ -1,9 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using System.IO;
+﻿using System.IO;
 
-namespace DSDecmp
+namespace DSDecmp.Exceptions
 {
     /// <summary>
     /// An exception thrown by the compression or decompression function, indicating that the
@@ -16,7 +13,8 @@ namespace DSDecmp
         /// </summary>
         public StreamTooShortException()
             : base("The end of the stream was reached "
-                 + "before the given amout of data was read.")
-        { }
+                   + "before the given amout of data was read.")
+        {
+        }
     }
 }

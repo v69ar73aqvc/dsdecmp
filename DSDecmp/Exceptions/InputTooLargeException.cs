@@ -1,8 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 
-namespace DSDecmp
+namespace DSDecmp.Exceptions
 {
     /// <summary>
     /// An exception indicating that the file cannot be compressed, because the decompressed size
@@ -15,6 +13,8 @@ namespace DSDecmp
         /// </summary>
         public InputTooLargeException()
             : base("The compression ratio is not high enough to fit the input "
-            + "in a single compressed file.") { }
+                   + "in a single compressed file.")
+        {
+        }
     }
 }

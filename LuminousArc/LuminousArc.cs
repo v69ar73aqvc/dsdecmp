@@ -1,42 +1,34 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 using System.IO;
-using DSDecmp;
+using DSDecmp.Exceptions;
+using DSDecmp.Formats;
+using DSDecmp.Utils;
 
-namespace GameFormats
+namespace LuminousArc
 {
     /// <summary>
     /// Compressor/decompressor for the LZE format found in Luminous Arc games. Format specification by Roger Pepitone; http://pastebin.com/qNgSB2f9
     /// </summary>
     public class LuminousArc : CompressionFormat
     {
+        public override string ShortFormatString => "LZE/Le";
 
-        public override string ShortFormatString
-        {
-            get { return "LZE/Le"; }
-        }
+        public override string Description => "A variant of an LZ/RLE scheme found in Luminous Arc games.";
 
-        public override string Description
-        {
-            get { return "A variant of an LZ/RLE scheme found in Luminous Arc games."; }
-        }
+        public override string CompressionFlag => "Le";
 
-        public override string CompressionFlag
-        {
-            get { return "Le"; }
-        }
-
-        public override bool SupportsCompression
-        {
-            get { return true; }
-        }
+        public override bool SupportsCompression => true;
 
         private static bool lookAhead = false;
+
         /// <summary>
         /// Gets or sets if, when compressing using this format, the optimal compression scheme should be used.
         /// </summary>
-        public static bool LookAhead { get { return lookAhead; } set { lookAhead = value; } }
+        public static bool LookAhead
+        {
+            get { return lookAhead; }
+            set { lookAhead = value; }
+        }
 
         /*
          * An LZE / Le file consists of the following:
@@ -59,7 +51,7 @@ namespace GameFormats
             -- 2 bytes BYTE1 BYTE2: Write (3 + (BYTE2 >> 4)) bytes from
                                     back (5 + (BYTE1 | ((BYTE2 & 0xf) << 8))) to output
             - If its type is 1:
-            -- 1 byte BYTE1:  Write (2 + (BYTE >> 2)) bytes from 
+            -- 1 byte BYTE1:  Write (2 + (BYTE >> 2)) bytes from
                               back (1 + (BYTE & 3)) to output
             - If its type is 2:
             -- 1 byte: (copied to output stream)
@@ -71,11 +63,12 @@ namespace GameFormats
          */
 
         #region Method: Supports(Stream, inLength)
+
         /// <summary>
         /// Determines if this format may potentially be used to decompress the given stream.
         /// Does not guarantee success when returning true, but does guarantee failure when returning false.
         /// </summary>
-        public override bool Supports(System.IO.Stream stream, long inLength)
+        public override bool Supports(Stream stream, long inLength)
         {
             long streamStart = stream.Position;
             try
@@ -101,21 +94,23 @@ namespace GameFormats
                 stream.Position = streamStart;
             }
         }
+
         #endregion
 
         #region Method: Decompress(instream, inLength, outstream)
+
         /// <summary>
         /// Decompresses the given stream using the LZE/Le compression format.
         /// </summary>
-        public override long Decompress(System.IO.Stream instream, long inLength, System.IO.Stream outstream)
+        public override long Decompress(Stream instream, long inLength, Stream outstream)
         {
             long readBytes = 0;
 
             byte[] magic = new byte[2];
             instream.Read(magic, 0, 2);
             if (magic[0] != 'L' || magic[1] != 'e')
-                throw new InvalidDataException("The provided stream is not a valid LZE (Le) "
-                            + "compressed stream (invalid magic '" + (char)magic[0] + (char)magic[1] + "')");
+                throw new InvalidDataException(
+                    $"The provided stream is not a valid LZE (Le) compressed stream (invalid magic '{(char)magic[0]}{(char)magic[1]}')");
             byte[] sizeBytes = new byte[4];
             instream.Read(sizeBytes, 0, 4);
             uint decompressedSize = IOUtils.ToNDSu32(sizeBytes, 0);
@@ -132,14 +127,17 @@ namespace GameFormats
             while (currentOutSize < decompressedSize)
             {
                 // (throws when requested new flags byte is not available)
+
                 #region Update the mask. If all flag bits have been read, get a new set.
+
                 // the current mask is the mask used in the previous run. So if it masks the
                 // last flag bit, get a new flags byte.
                 if (mask == 3)
                 {
                     if (readBytes >= inLength)
                         throw new NotEnoughDataException(currentOutSize, decompressedSize);
-                    flags = instream.ReadByte(); readBytes++;
+                    flags = instream.ReadByte();
+                    readBytes++;
                     if (flags < 0)
                         throw new StreamTooShortException();
                     mask = 0xC0;
@@ -149,103 +147,149 @@ namespace GameFormats
                     mask >>= 2;
                     flags >>= 2;
                 }
+
                 #endregion
 
                 switch (flags & 0x3)
                 {
                     case 0:
+
                         #region 0 -> LZ10-like format
+
+                    {
+                        #region Get length and displacement('disp') values from next 2 bytes
+
+                        // there are < 2 bytes available when the end is at most 1 byte away
+                        if (readBytes + 1 >= inLength)
                         {
-                            #region Get length and displacement('disp') values from next 2 bytes
-                            // there are < 2 bytes available when the end is at most 1 byte away
-                            if (readBytes + 1 >= inLength)
+                            // make sure the stream is at the end
+                            if (readBytes < inLength)
                             {
-                                // make sure the stream is at the end
-                                if (readBytes < inLength)
-                                {
-                                    instream.ReadByte(); readBytes++;
-                                }
-                                throw new NotEnoughDataException(currentOutSize, decompressedSize);
+                                instream.ReadByte();
+                                readBytes++;
                             }
-                            int byte1 = instream.ReadByte(); readBytes++;
-                            int byte2 = instream.ReadByte(); readBytes++;
-                            if (byte2 < 0)
-                                throw new StreamTooShortException();
 
-                            // the number of bytes to copy
-                            int length = byte2 >> 4;
-                            length += 3;
-
-                            // from where the bytes should be copied (relatively)
-                            int disp = ((byte2 & 0x0F) << 8) | byte1;
-                            disp += 5;
-
-                            if (disp > currentOutSize)
-                                throw new InvalidDataException("Cannot go back more than already written. "
-                                        + "DISP = 0x" + disp.ToString("X") + ", #written bytes = 0x" + currentOutSize.ToString("X")
-                                        + " at 0x" + (instream.Position - 2).ToString("X"));
-                            #endregion
-
-                            int bufIdx = bufferOffset + bufferLength - disp;
-                            for (int i = 0; i < length; i++)
-                            {
-                                byte next = buffer[bufIdx % bufferLength];
-                                bufIdx++;
-                                outstream.WriteByte(next);
-                                buffer[bufferOffset] = next;
-                                bufferOffset = (bufferOffset + 1) % bufferLength;
-                            }
-                            currentOutSize += length;
-
-                            break;
+                            throw new NotEnoughDataException(currentOutSize, decompressedSize);
                         }
+
+                        int byte1 = instream.ReadByte();
+                        readBytes++;
+                        int byte2 = instream.ReadByte();
+                        readBytes++;
+                        if (byte2 < 0)
+                            throw new StreamTooShortException();
+
+                        // the number of bytes to copy
+                        int length = byte2 >> 4;
+                        length += 3;
+
+                        // from where the bytes should be copied (relatively)
+                        int disp = ((byte2 & 0x0F) << 8) | byte1;
+                        disp += 5;
+
+                        if (disp > currentOutSize)
+                            throw new InvalidDataException(
+                                $"Cannot go back more than already written. DISP = 0x{disp:X}, #written bytes = 0x{currentOutSize:X} at 0x{(instream.Position - 2):X}");
+
                         #endregion
+
+                        int bufIdx = bufferOffset + bufferLength - disp;
+                        for (int i = 0; i < length; i++)
+                        {
+                            byte next = buffer[bufIdx % bufferLength];
+                            bufIdx++;
+                            outstream.WriteByte(next);
+                            buffer[bufferOffset] = next;
+                            bufferOffset = (bufferOffset + 1) % bufferLength;
+                        }
+
+                        currentOutSize += length;
+
+                        break;
+                    }
+
+                    #endregion
+
                     case 1:
+
                         #region 1 -> compact LZ10/RLE-like format
+
+                    {
+                        #region Get length and displacement('disp') values from next byte
+
+                        // there are < 2 bytes available when the end is at most 1 byte away
+                        if (readBytes >= inLength)
                         {
-                            #region Get length and displacement('disp') values from next byte
-                            // there are < 2 bytes available when the end is at most 1 byte away
-                            if (readBytes >= inLength)
-                            {
-                                throw new NotEnoughDataException(currentOutSize, decompressedSize);
-                            }
-                            int b = instream.ReadByte(); readBytes++;
-                            if (b < 0)
-                                throw new StreamTooShortException();
-
-                            // the number of bytes to copy
-                            int length = b >> 2;
-                            length += 2;
-
-                            // from where the bytes should be copied (relatively)
-                            int disp = (b & 0x03);
-                            disp += 1;
-
-                            if (disp > currentOutSize)
-                                throw new InvalidDataException("Cannot go back more than already written. "
-                                        + "DISP = 0x" + disp.ToString("X") + ", #written bytes = 0x" + currentOutSize.ToString("X")
-                                        + " at 0x" + (instream.Position - 1).ToString("X"));
-                            #endregion
-
-                            int bufIdx = bufferOffset + bufferLength - disp;
-                            for (int i = 0; i < length; i++)
-                            {
-                                byte next = buffer[bufIdx % bufferLength];
-                                bufIdx++;
-                                outstream.WriteByte(next);
-                                buffer[bufferOffset] = next;
-                                bufferOffset = (bufferOffset + 1) % bufferLength;
-                            }
-                            currentOutSize += length;
-                            break;
+                            throw new NotEnoughDataException(currentOutSize, decompressedSize);
                         }
+
+                        int b = instream.ReadByte();
+                        readBytes++;
+                        if (b < 0)
+                            throw new StreamTooShortException();
+
+                        // the number of bytes to copy
+                        int length = b >> 2;
+                        length += 2;
+
+                        // from where the bytes should be copied (relatively)
+                        int disp = (b & 0x03);
+                        disp += 1;
+
+                        if (disp > currentOutSize)
+                            throw new InvalidDataException(
+                                $"Cannot go back more than already written. DISP = 0x{disp:X}, #written bytes = 0x{currentOutSize:X} at 0x{(instream.Position - 1):X}");
+
                         #endregion
+
+                        int bufIdx = bufferOffset + bufferLength - disp;
+                        for (int i = 0; i < length; i++)
+                        {
+                            byte next = buffer[bufIdx % bufferLength];
+                            bufIdx++;
+                            outstream.WriteByte(next);
+                            buffer[bufferOffset] = next;
+                            bufferOffset = (bufferOffset + 1) % bufferLength;
+                        }
+
+                        currentOutSize += length;
+                        break;
+                    }
+
+                    #endregion
+
                     case 2:
+
                         #region 2 -> copy 1 byte
+
+                    {
+                        if (readBytes >= inLength)
+                            throw new NotEnoughDataException(currentOutSize, decompressedSize);
+                        int next = instream.ReadByte();
+                        readBytes++;
+                        if (next < 0)
+                            throw new StreamTooShortException();
+
+                        currentOutSize++;
+                        outstream.WriteByte((byte)next);
+                        buffer[bufferOffset] = (byte)next;
+                        bufferOffset = (bufferOffset + 1) % bufferLength;
+                        break;
+                    }
+
+                    #endregion
+
+                    case 3:
+
+                        #region 3 -> copy 3 bytes
+
+                    {
+                        for (int i = 0; i < 3; i++)
                         {
                             if (readBytes >= inLength)
                                 throw new NotEnoughDataException(currentOutSize, decompressedSize);
-                            int next = instream.ReadByte(); readBytes++;
+                            int next = instream.ReadByte();
+                            readBytes++;
                             if (next < 0)
                                 throw new StreamTooShortException();
 
@@ -253,28 +297,13 @@ namespace GameFormats
                             outstream.WriteByte((byte)next);
                             buffer[bufferOffset] = (byte)next;
                             bufferOffset = (bufferOffset + 1) % bufferLength;
-                            break;
                         }
-                        #endregion
-                    case 3:
-                        #region 3 -> copy 3 bytes
-                        {
-                            for (int i = 0; i < 3; i++)
-                            {
-                                if (readBytes >= inLength)
-                                    throw new NotEnoughDataException(currentOutSize, decompressedSize);
-                                int next = instream.ReadByte(); readBytes++;
-                                if (next < 0)
-                                    throw new StreamTooShortException();
 
-                                currentOutSize++;
-                                outstream.WriteByte((byte)next);
-                                buffer[bufferOffset] = (byte)next;
-                                bufferOffset = (bufferOffset + 1) % bufferLength;
-                            }
-                            break;
-                        }
+                        break;
+                    }
+
                     #endregion
+
                     default:
                         throw new Exception("BUG: Mask is not 2 bits long!");
                 }
@@ -292,6 +321,7 @@ namespace GameFormats
 
             return decompressedSize;
         }
+
         #endregion
 
         /// <summary>
@@ -307,10 +337,11 @@ namespace GameFormats
                     LookAhead = true;
                     return 1;
                 }
+
             return 0;
         }
 
-        public unsafe override int Compress(System.IO.Stream instream, long inLength, System.IO.Stream outstream)
+        public unsafe override int Compress(Stream instream, long inLength, Stream outstream)
         {
             // block type 0: stores at most 3+0xF  = 0x12 = 18 bytes (in 2 bytes)
             // block type 1: stores at most 2+0x3F = 0x41 = 65 bytes (in 1 byte)
@@ -352,6 +383,7 @@ namespace GameFormats
                 while (readBytes < inLength)
                 {
                     #region If 4 blocks are bufferd, write them and reset the buffer
+
                     // we can only buffer 4 blocks at a time.
                     if (bufferedBlocks == 4)
                     {
@@ -362,6 +394,7 @@ namespace GameFormats
                         bufferlength = 1;
                         bufferedBlocks = 0;
                     }
+
                     #endregion
 
                     // type 0: 3 <= len <= 18; 5 <= disp <= 0x1004
@@ -372,8 +405,9 @@ namespace GameFormats
                     // check if we can compress it using type 1 first (only 1 byte-long block)
                     int disp;
                     int oldLength = Math.Min(readBytes, 0x1004);
-                    int length = LZUtil.GetOccurrenceLength(instart + readBytes, (int)Math.Min(inLength - readBytes, 65),
-                                                            instart + readBytes - oldLength, oldLength, out disp, 1);
+                    int length = LZUtil.GetOccurrenceLength(instart + readBytes,
+                        (int)Math.Min(inLength - readBytes, 65),
+                        instart + readBytes - oldLength, oldLength, out disp, 1);
                     if (disp >= 1 && ((disp <= 4 && length >= 2) || (disp >= 5 && length >= 3)))
                     {
                         if (cacheByte >= 0)
@@ -386,6 +420,7 @@ namespace GameFormats
                             // the block set may be full; just retry this iteration.
                             continue;
                         }
+
                         if (disp >= 5)
                         {
                             #region compress using type 0
@@ -452,7 +487,7 @@ namespace GameFormats
                             }
                         }
                     }
-                    
+
                     bufferedBlocks++;
                 }
 
@@ -491,7 +526,7 @@ namespace GameFormats
             return compressedLength;
         }
 
-        private unsafe int CompressWithLA(Stream instream, long inLength, Stream outstream)
+        private int CompressWithLA(Stream instream, long inLength, Stream outstream)
         {
             throw new NotImplementedException();
         }

@@ -1,9 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using System.IO;
+﻿using System.IO;
+using DSDecmp.Exceptions;
 
-namespace DSDecmp
+namespace DSDecmp.Formats
 {
     /// <summary>
     /// Base class for all compression formats.
@@ -22,10 +20,8 @@ namespace DSDecmp
         public virtual bool Supports(string file)
         {
             // open the file, and delegate to the decompressor-specific code.
-            using (FileStream fstr = new FileStream(file, FileMode.Open))
-            {
-                return this.Supports(fstr, fstr.Length);
-            }
+            using FileStream fstr = new FileStream(file, FileMode.Open);
+            return Supports(fstr, fstr.Length);
         }
 
         /// <summary>
@@ -56,11 +52,9 @@ namespace DSDecmp
             if (!Directory.Exists(outDirectory))
                 Directory.CreateDirectory(outDirectory);
             // open the two given files, and delegate to the format-specific code.
-            using (FileStream inStream = new FileStream(infile, FileMode.Open),
-                             outStream = new FileStream(outfile, FileMode.Create))
-            {
-                this.Decompress(inStream, inStream.Length, outStream);
-            }
+            using FileStream inStream = new FileStream(infile, FileMode.Open),
+                outStream = new FileStream(outfile, FileMode.Create);
+            Decompress(inStream, inStream.Length, outStream);
         }
 
         /// <summary>
@@ -94,11 +88,9 @@ namespace DSDecmp
             if (!Directory.Exists(outDirectory))
                 Directory.CreateDirectory(outDirectory);
             // open the proper Streams, and delegate to the format-specific code.
-            using (FileStream inStream = File.Open(infile, FileMode.Open),
-                             outStream = File.Create(outfile))
-            {
-                return this.Compress(inStream, inStream.Length, outStream);
-            }
+            using FileStream inStream = File.Open(infile, FileMode.Open),
+                outStream = File.Create(outfile);
+            return Compress(inStream, inStream.Length, outStream);
         }
 
         /// <summary>
@@ -115,6 +107,7 @@ namespace DSDecmp
         /// Gets a short string identifying this compression format.
         /// </summary>
         public abstract string ShortFormatString { get; }
+
         /// <summary>
         /// Gets a short description of this compression format (used in the program usage).
         /// </summary>
@@ -124,19 +117,25 @@ namespace DSDecmp
         /// Gets if this format supports compressing a file.
         /// </summary>
         public abstract bool SupportsCompression { get; }
+
         /// <summary>
         /// Gets if this format supports decompressing a file.
         /// </summary>
-        public virtual bool SupportsDecompression { get { return true; } }
+        public virtual bool SupportsDecompression => true;
+
         /// <summary>
         /// Gets the value that must be given on the command line in order to compress using this format.
         /// </summary>
         public abstract string CompressionFlag { get; }
+
         /// <summary>
         /// Parses any input specific for this format. Does nothing by default.
         /// </summary>
         /// <param name="args">Any arguments that may be used by the format.</param>
         /// <returns>The number of input arguments consumed by this format.</returns>
-        public virtual int ParseCompressionOptions(string[] args) { return 0; }
+        public virtual int ParseCompressionOptions(string[] args)
+        {
+            return 0;
+        }
     }
 }

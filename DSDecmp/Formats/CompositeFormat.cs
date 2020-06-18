@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
 using System.IO;
+using DSDecmp.Exceptions;
 
 namespace DSDecmp.Formats
 {
@@ -27,6 +27,7 @@ namespace DSDecmp.Formats
         {
             this.formats = new List<CompressionFormat>(formats);
         }
+
         /// <summary>
         /// Creates a new composite format based on the given formats.
         /// </summary>
@@ -39,72 +40,80 @@ namespace DSDecmp.Formats
 
 
         #region Method: Supports
+
         /// <summary>
         /// Checks if any of the contained formats supports the given input.
         /// </summary>
-        public override bool Supports(System.IO.Stream stream, long inLength)
+        public override bool Supports(Stream stream, long inLength)
         {
-            foreach (CompositeFormat fmt in this.formats)
+            foreach (CompressionFormat fmt in formats)
             {
                 if (fmt.Supports(stream, inLength))
                     return true;
             }
+
             return false;
         }
+
         #endregion
 
         #region Method: Decompress
+
         /// <summary>
         /// Attempts to decompress the given input by letting all contained formats
         /// try to decompress the input.
         /// </summary>
-        public override long Decompress(System.IO.Stream instream, long inLength, System.IO.Stream outstream)
+        public override long Decompress(Stream instream, long inLength, Stream outstream)
         {
             byte[] inputData = new byte[instream.Length];
             instream.Read(inputData, 0, inputData.Length);
 
-            foreach (CompressionFormat format in this.formats)
+            foreach (CompressionFormat format in formats)
             {
                 if (!format.SupportsDecompression)
                     continue;
-                using (MemoryStream input = new MemoryStream(inputData))
+                using MemoryStream input = new MemoryStream(inputData);
+                if (!format.Supports(input, inputData.Length))
+                    continue;
+                MemoryStream output = new MemoryStream();
+                try
                 {
-                    if (!format.Supports(input, inputData.Length))
-                        continue;
-                    MemoryStream output = new MemoryStream();
-                    try
+                    long decLength = format.Decompress(input, inputData.Length, output);
+                    if (decLength > 0)
                     {
-                        long decLength = format.Decompress(input, inputData.Length, output);
-                        if (decLength > 0)
-                        {
-                            output.WriteTo(outstream);
-                            return decLength;
-                        }
+                        output.WriteTo(outstream);
+                        return decLength;
                     }
-                    catch (Exception) { continue; }
+                }
+                catch (Exception)
+                {
+                    continue;
                 }
             }
 
-            throw new InvalidDataException("Input cannot be decompressed using the " + this.ShortFormatString + " formats.");
+            throw new InvalidDataException($"Input cannot be decompressed using the {ShortFormatString} formats.");
         }
+
         #endregion
 
         #region Method: Compress & Field: LastUsedCompressFormatString
+
         /// <summary>
         /// Gets the ShortFormatString of the last CompressionFormat that was used to compress input.
         /// </summary>
-        public string LastUsedCompressFormatString { get; private set; }
+        public string? LastUsedCompressFormatString { get; private set; }
+
         /// <summary>
         /// Compresses the given input using the contained format that yields the best results in terms of
         /// size reduction.
         /// </summary>
-        public override int Compress(System.IO.Stream instream, long inLength, System.IO.Stream outstream)
+        public override int Compress(Stream instream, long inLength, Stream outstream)
         {
             // only read the input data once from the file.
             byte[] inputData = new byte[instream.Length];
             instream.Read(inputData, 0, inputData.Length);
 
-            MemoryStream bestOutput = null;
+            MemoryStream? bestOutput = null;
             string bestFormatString = "";
             int minCompSize = int.MaxValue;
             foreach (CompressionFormat format in formats)
@@ -118,10 +127,8 @@ namespace DSDecmp.Formats
                 int currentOutSize;
                 try
                 {
-                    using (MemoryStream input = new MemoryStream(inputData))
-                    {
-                        currentOutSize = format.Compress(input, input.Length, currentOutput);
-                    }
+                    using MemoryStream input = new MemoryStream(inputData);
+                    currentOutSize = format.Compress(input, input.Length, currentOutput);
                 }
                 catch (InputTooLargeException i)
                 {
@@ -133,6 +140,7 @@ namespace DSDecmp.Formats
                 {
                     continue;
                 }
+
                 if (currentOutSize < minCompSize)
                 {
                     bestOutput = currentOutput;
@@ -146,12 +154,14 @@ namespace DSDecmp.Formats
             if (bestOutput == null)
                 return -1;
             bestOutput.WriteTo(outstream);
-            this.LastUsedCompressFormatString = bestFormatString;
+            LastUsedCompressFormatString = bestFormatString;
             return minCompSize;
         }
+
         #endregion
 
         #region Method: ParseCompressionOptions(args)
+
         /// <summary>
         /// Handles the compression options for each of the contained compression formats.
         /// </summary>
@@ -174,7 +184,7 @@ namespace DSDecmp.Formats
                 int maxOptionCount = 0;
                 string[] subArray = new string[args.Length - totalOptionCount];
                 Array.Copy(args, totalOptionCount, subArray, 0, subArray.Length);
-                foreach (CompressionFormat format in this.formats)
+                foreach (CompressionFormat format in formats)
                 {
                     int optCount = format.ParseCompressionOptions(subArray);
                     maxOptionCount = Math.Max(optCount, maxOptionCount);
@@ -186,9 +196,10 @@ namespace DSDecmp.Formats
                     usedOption = true;
                 }
             }
+
             return totalOptionCount;
         }
-        #endregion
 
+        #endregion
     }
 }

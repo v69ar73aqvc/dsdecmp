@@ -1,7 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 using System.IO;
+using DSDecmp.Exceptions;
+using DSDecmp.Utils;
 
 namespace DSDecmp.Formats.Nitro
 {
@@ -14,45 +14,35 @@ namespace DSDecmp.Formats.Nitro
         /// <summary>
         /// Gets a short string identifying this compression format.
         /// </summary>
-        public override string ShortFormatString
-        {
-            get { return "NULL"; }
-        }
+        public override string ShortFormatString => "NULL";
 
         /// <summary>
         /// Gets a short description of this compression format (used in the program usage).
         /// </summary>
-        public override string Description
-        {
-            get { return "NULL-'compression' format. Prefixes file with 0x00 and filesize."; }
-        }
+        public override string Description => "NULL-'compression' format. Prefixes file with 0x00 and filesize.";
 
         /// <summary>
         /// Gets if this format supports compressing a file.
         /// </summary>
-        public override bool SupportsCompression
-        {
-            get { return true; }
-        }
+        public override bool SupportsCompression => true;
 
         /// <summary>
         /// Gets the value that must be given on the command line in order to compress using this format.
         /// </summary>
-        public override string CompressionFlag
-        {
-            get { return "null"; }
-        }
+        public override string CompressionFlag => "null";
 
         /// <summary>
         /// Creates a new instance of the NULL-compression format.
         /// </summary>
         public NullCompression()
-            : base(0) { }
+            : base(0)
+        {
+        }
 
         /// <summary>
         /// Checks if the given stream is (or could be) 'compressed' using the NULL compression format.
         /// </summary>
-        public override bool Supports(System.IO.Stream stream, long inLength)
+        public override bool Supports(Stream stream, long inLength)
         {
             long startPosition = stream.Position;
             try
@@ -71,6 +61,7 @@ namespace DSDecmp.Formats.Nitro
                     outSize = (int)IOUtils.ToNDSu32(sizeBytes, 0);
                     headerSize = 8;
                 }
+
                 return outSize == inLength - headerSize;
             }
             finally
@@ -82,14 +73,14 @@ namespace DSDecmp.Formats.Nitro
         /// <summary>
         /// 'Decompresses' the given input stream using the NULL format.
         /// </summary>
-        public override long Decompress(System.IO.Stream instream, long inLength, System.IO.Stream outstream)
+        public override long Decompress(Stream instream, long inLength, Stream outstream)
         {
             long readBytes = 0;
 
             byte type = (byte)instream.ReadByte();
-            if (type != base.magicByte)
-                throw new InvalidDataException("The provided stream is not a valid Null "
-                            + "compressed stream (invalid type 0x" + type.ToString("X") + ")");
+            if (type != magicByte)
+                throw new InvalidDataException(
+                    $"The provided stream is not a valid Null compressed stream (invalid type 0x{type:X})");
             byte[] sizeBytes = new byte[3];
             instream.Read(sizeBytes, 0, 3);
             int decompressedSize = IOUtils.ToNDSu24(sizeBytes, 0);
@@ -114,7 +105,7 @@ namespace DSDecmp.Formats.Nitro
         /// <summary>
         /// 'Compresses' the given input stream using the NULL format.
         /// </summary>
-        public override int Compress(System.IO.Stream instream, long inLength, System.IO.Stream outstream)
+        public override int Compress(Stream instream, long inLength, Stream outstream)
         {
             if (inLength > 0xFFFFFFFF)
                 throw new InputTooLargeException();

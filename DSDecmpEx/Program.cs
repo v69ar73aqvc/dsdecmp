@@ -3,13 +3,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using DSDecmp;
+using DSDecmp.Exceptions;
 using DSDecmp.Formats;
 using DSDecmp.Formats.Nitro;
+using DSDecmp.Utils;
 
 namespace DSDecmpEx
 {
-    public class NewestProgram
+    public static class Program
     {
 #if DEBUG
         public static string PluginFolder = "./Plugins/Debug";
@@ -55,9 +56,17 @@ namespace DSDecmpEx
 
             if (args[0] == "-c")
             {
-                if (args.Length <= 2) { Console.WriteLine("Too few arguments."); return; }
+                if (args.Length <= 2)
+                {
+                    Console.WriteLine("Too few arguments.");
+                    return;
+                }
+
                 CompressionFormat format = GetFormat(args[1]).FirstOrDefault();
-                if (format == null) { return; }
+                if (format == null)
+                {
+                    return;
+                }
 
                 string[] ioArgs = new string[args.Length - 2];
                 Array.Copy(args, 2, ioArgs, 0, ioArgs.Length);
@@ -70,7 +79,12 @@ namespace DSDecmpEx
             }
             else if (args[0] == "-d")
             {
-                if (args.Length <= 1) { PrintUsage(); return; }
+                if (args.Length <= 1)
+                {
+                    PrintUsage();
+                    return;
+                }
+
                 int ioIdx = 1;
                 bool guessExtension = false;
                 if (args[ioIdx] == "-ge")
@@ -78,15 +92,31 @@ namespace DSDecmpEx
                     guessExtension = true;
                     ioIdx++;
                 }
-                IEnumerable<CompressionFormat> formats = GetAllFormats(false); // we do not need the built-in composite formats to decompress.
+
+                IEnumerable<CompressionFormat>
+                    formats = GetAllFormats(false); // we do not need the built-in composite formats to decompress.
                 if (args[ioIdx] == "-f")
                 {
-                    if (args.Length <= ioIdx + 2) { Console.WriteLine("Too few arguments."); return; }
+                    if (args.Length <= ioIdx + 2)
+                    {
+                        Console.WriteLine("Too few arguments.");
+                        return;
+                    }
+
                     formats = GetFormat(args[ioIdx + 1]);
                     ioIdx += 2;
                 }
-                if (formats == null) { return; }
-                if (args.Length <= ioIdx) { Console.WriteLine("Too few arguments."); return; }
+
+                if (formats == null)
+                {
+                    return;
+                }
+
+                if (args.Length <= ioIdx)
+                {
+                    Console.WriteLine("Too few arguments.");
+                    return;
+                }
 
                 string[] ioArgs = new string[args.Length - ioIdx];
                 Array.Copy(args, ioIdx, ioArgs, 0, ioArgs.Length);
@@ -100,6 +130,7 @@ namespace DSDecmpEx
         }
 
         #region Usage printer
+
         private static void PrintUsage()
         {
             Console.WriteLine("DSDecmp - Decompressor for compression formats used on the NDS - by Barubary");
@@ -137,13 +168,16 @@ namespace DSDecmpEx
             Console.WriteLine("<format> -> description");
             foreach (CompressionFormat fmt in GetAllFormats(true))
             {
-                Console.WriteLine(fmt.CompressionFlag.PadRight(7, ' ') + "-> " + fmt.Description);
+                Console.WriteLine($"{fmt.CompressionFlag.PadRight(7, ' ')}-> {fmt.Description}");
             }
+
             Console.WriteLine("-------------------------------------------------------------------------------");
         }
+
         #endregion
 
         #region Method: Decompress(string[] ioArgs, IEnumerable<CompressionFormat> formats)
+
         private static void Decompress(string[] ioArgs, IEnumerable<CompressionFormat> formats, bool guessExtension)
         {
             string[] inputFiles;
@@ -167,6 +201,7 @@ namespace DSDecmpEx
                         inputData = new byte[inStream.Length];
                         inStream.Read(inputData, 0, inputData.Length);
                     }
+
                     bool decompressed = false;
                     foreach (CompressionFormat format in formats)
                     {
@@ -175,60 +210,62 @@ namespace DSDecmpEx
 
                         #region try to decompress using the current format
 
-                        using (MemoryStream inStr = new MemoryStream(inputData),
-                                            outStr = new MemoryStream())
+                        using MemoryStream inStr = new MemoryStream(inputData),
+                            outStr = new MemoryStream();
+                        if (!format.Supports(inStr, inputData.Length))
+                            continue;
+                        try
                         {
-                            if (!format.Supports(inStr, inputData.Length))
+                            long decompSize = format.Decompress(inStr, inputData.Length, outStr);
+                            if (decompSize < 0)
                                 continue;
-                            try
+                            if (guessExtension)
                             {
-                                long decompSize = format.Decompress(inStr, inputData.Length, outStr);
-                                if (decompSize < 0)
-                                    continue;
-                                if (guessExtension)
-                                {
-                                    string outFileName = Path.GetFileNameWithoutExtension(outputFile);
-                                    outStr.Position = 0;
-                                    byte[] magic = new byte[4];
-                                    outStr.Read(magic, 0, 4);
-                                    outStr.Position = 0;
-                                    outFileName += "." + GuessExtension(magic, Path.GetExtension(outputFile).Substring(1));
-                                    outputFile = outputFile.Replace(Path.GetFileName(outputFile), outFileName);
-                                }
-                                using (FileStream output = File.Create(outputFile))
-                                {
-                                    outStr.WriteTo(output);
-                                }
-                                decompressed = true;
-                                Console.WriteLine(format.ShortFormatString + "-decompressed " + input + " to " + outputFile);
-                                break;
+                                string outFileName = Path.GetFileNameWithoutExtension(outputFile);
+                                outStr.Position = 0;
+                                byte[] magic = new byte[4];
+                                outStr.Read(magic, 0, 4);
+                                outStr.Position = 0;
+                                outFileName += $".{GuessExtension(magic, Path.GetExtension(outputFile).Substring(1))}";
+                                outputFile = outputFile.Replace(Path.GetFileName(outputFile), outFileName);
                             }
-                            catch (TooMuchInputException tmie)
+
+                            using (FileStream output = File.Create(outputFile))
                             {
-                                // a TMIE is fine. let the user know and continue saving the decompressed data.
-                                Console.WriteLine(tmie.Message);
-                                if (guessExtension)
-                                {
-                                    string outFileName = Path.GetFileNameWithoutExtension(outputFile);
-                                    outStr.Position = 0;
-                                    byte[] magic = new byte[4];
-                                    outStr.Read(magic, 0, 4);
-                                    outStr.Position = 0;
-                                    outFileName += "." + GuessExtension(magic, Path.GetExtension(outputFile).Substring(1));
-                                    outputFile = outputFile.Replace(Path.GetFileName(outputFile), outFileName);
-                                }
-                                using (FileStream output = File.Create(outputFile))
-                                {
-                                    outStr.WriteTo(output);
-                                }
-                                decompressed = true;
-                                Console.WriteLine(format.ShortFormatString + "-decompressed " + input + " to " + outputFile);
-                                break;
+                                outStr.WriteTo(output);
                             }
-                            catch (Exception)
+
+                            decompressed = true;
+                            Console.WriteLine($"{format.ShortFormatString}-decompressed {input} to {outputFile}");
+                            break;
+                        }
+                        catch (TooMuchInputException tmie)
+                        {
+                            // a TMIE is fine. let the user know and continue saving the decompressed data.
+                            Console.WriteLine(tmie.Message);
+                            if (guessExtension)
                             {
-                                continue;
+                                string outFileName = Path.GetFileNameWithoutExtension(outputFile);
+                                outStr.Position = 0;
+                                byte[] magic = new byte[4];
+                                outStr.Read(magic, 0, 4);
+                                outStr.Position = 0;
+                                outFileName += $".{GuessExtension(magic, Path.GetExtension(outputFile).Substring(1))}";
+                                outputFile = outputFile.Replace(Path.GetFileName(outputFile), outFileName);
                             }
+
+                            using (FileStream output = File.Create(outputFile))
+                            {
+                                outStr.WriteTo(output);
+                            }
+
+                            decompressed = true;
+                            Console.WriteLine($"{format.ShortFormatString}-decompressed {input} to {outputFile}");
+                            break;
+                        }
+                        catch (Exception)
+                        {
+                            continue;
                         }
 
                         #endregion
@@ -243,19 +280,19 @@ namespace DSDecmpEx
                             Copy(input, outputFile);
                         }
                         else
-                            Console.WriteLine("No suitable decompressor found for " + input + ".");
+                            Console.WriteLine($"No suitable decompressor found for {input}.");
 
                         #endregion
                     }
                 }
                 catch (FileNotFoundException)
                 {
-                    Console.WriteLine("The file " + input + " does not exist.");
+                    Console.WriteLine($"The file {input} does not exist.");
                     continue;
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("Could not load file " + input + ";");
+                    Console.WriteLine($"Could not load file {input};");
                     Console.WriteLine(ex.Message);
 #if DEBUG
                     Console.WriteLine(ex.StackTrace);
@@ -263,9 +300,11 @@ namespace DSDecmpEx
                 }
             } // end foreach input
         }
+
         #endregion Method: Decompress
 
         #region Method: Compress
+
         /// <summary>
         /// (Attempts to) Compress the given input to the given output, using the given format.
         /// </summary>
@@ -275,7 +314,7 @@ namespace DSDecmpEx
         {
             if (!format.SupportsCompression)
             {
-                Console.WriteLine("Cannot compress using " + format.ShortFormatString + "; compression is not supported.");
+                Console.WriteLine($"Cannot compress using {format.ShortFormatString}; compression is not supported.");
                 return;
             }
 
@@ -304,7 +343,7 @@ namespace DSDecmpEx
                     #region try to compress
 
                     using (MemoryStream inStr = new MemoryStream(inputData),
-                                        outStr = new MemoryStream())
+                        outStr = new MemoryStream())
                     {
                         try
                         {
@@ -315,11 +354,12 @@ namespace DSDecmpEx
                                 {
                                     outStr.WriteTo(output);
                                 }
+
                                 if (format is CompositeFormat)
                                     Console.Write((format as CompositeFormat).LastUsedCompressFormatString);
                                 else
                                     Console.Write(format.ShortFormatString);
-                                Console.WriteLine("-compressed " + input + " to " + outputFile);
+                                Console.WriteLine($"-compressed {input} to {outputFile}");
                             }
                         }
                         catch (Exception ex)
@@ -332,7 +372,7 @@ namespace DSDecmpEx
                             }
                             else
                             {
-                                Console.WriteLine("Could not " + format.ShortFormatString + "-compress " + input + ";");
+                                Console.WriteLine($"Could not {format.ShortFormatString}-compress {input};");
                                 Console.WriteLine(ex.Message);
 #if DEBUG
                                 Console.WriteLine(ex.StackTrace);
@@ -347,12 +387,12 @@ namespace DSDecmpEx
                 }
                 catch (FileNotFoundException)
                 {
-                    Console.WriteLine("The file " + input + " does not exist.");
+                    Console.WriteLine($"The file {input} does not exist.");
                     continue;
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("Could not load file " + input + ";");
+                    Console.WriteLine($"Could not load file {input};");
                     Console.WriteLine(ex.Message);
 #if DEBUG
                     Console.WriteLine(ex.StackTrace);
@@ -360,9 +400,11 @@ namespace DSDecmpEx
                 }
             } // end foreach input
         }
+
         #endregion Method: Compress
 
         #region Method: ParseIOArguments
+
         /// <summary>
         /// Parses the IO arguments of the input.
         /// </summary>
@@ -374,7 +416,8 @@ namespace DSDecmpEx
         /// (the input may only contain one file if that si the case).</param>
         /// <param name="copyErrors">If files that cannot be handled (properly) should be copied to the output directory.</param>
         /// <returns>True iff parsing of the arguments succeeded.</returns>
-        private static bool ParseIOArguments(string[] ioArgs, bool compress, out string[] inputFiles, out string outputDir, out bool copyErrors)
+        private static bool ParseIOArguments(string[] ioArgs, bool compress, out string[] inputFiles,
+            out string outputDir, out bool copyErrors)
         {
             inputFiles = null;
             // when null, output dir = input dir. if it does not exist, it is the output file (only possible when only one input file).
@@ -382,6 +425,7 @@ namespace DSDecmpEx
             copyErrors = false;
 
             #region check if the -co flag is present
+
             if (ioArgs.Length > 0 && ioArgs[ioArgs.Length - 1] == "-co")
             {
                 string[] newIoArgs = new string[ioArgs.Length - 1];
@@ -389,6 +433,7 @@ namespace DSDecmpEx
                 ioArgs = newIoArgs;
                 copyErrors = true;
             }
+
             #endregion
 
             switch (ioArgs.Length)
@@ -401,9 +446,9 @@ namespace DSDecmpEx
                     {
                         inputFiles = Directory.GetFiles(ioArgs[0]);
                         if (compress)
-                            outputDir = Path.GetFullPath(ioArgs[0]) + "_cmp";
+                            outputDir = $"{Path.GetFullPath(ioArgs[0])}_cmp";
                         else
-                            outputDir = Path.GetFullPath(ioArgs[0]) + "_dec";
+                            outputDir = $"{Path.GetFullPath(ioArgs[0])}_dec";
                         if (!Directory.Exists(outputDir))
                             Directory.CreateDirectory(outputDir);
                         break;
@@ -416,7 +461,7 @@ namespace DSDecmpEx
                     }
                     else
                     {
-                        Console.WriteLine("The file " + ioArgs[0] + " does not exist.");
+                        Console.WriteLine($"The file {ioArgs[0]} does not exist.");
                         return false;
                     }
                 case 2:
@@ -436,17 +481,17 @@ namespace DSDecmpEx
                             outputDir = null;
                             break;
                         }
-                        else// if (Directory.Exists(ioArgs[1]))
-                        // both nonexisting file and existing directory is handled the same.
+                        else // if (Directory.Exists(ioArgs[1]))
+                            // both nonexisting file and existing directory is handled the same.
                         {
-                            inputFiles = new string[] { ioArgs[0] };
+                            inputFiles = new[] {ioArgs[0]};
                             outputDir = ioArgs[1];
                             break;
                         }
                     }
                     else
                     {
-                        Console.WriteLine("The file " + ioArgs[0] + " does not exist.");
+                        Console.WriteLine($"The file {ioArgs[0]} does not exist.");
                         return false;
                     }
                 default:
@@ -457,7 +502,7 @@ namespace DSDecmpEx
                         break;
                     }
                     else //if (Directory.Exists(ioArgs[ioArgs.Length - 1]))
-                    // both existing and nonexisting directories are fine.
+                        // both existing and nonexisting directories are fine.
                     {
                         outputDir = ioArgs[ioArgs.Length - 1];
                         inputFiles = new string[ioArgs.Length - 1];
@@ -472,9 +517,11 @@ namespace DSDecmpEx
 
             return true;
         }
+
         #endregion ParseIOArguments
 
         #region Method: GuessExtension(magic, defaultExt)
+
         /// <summary>
         /// Guess the extension of a file by looking at the given magic bytes of a file.
         /// If they are alphanumeric (without accents), they could indicate the type of file.
@@ -486,17 +533,19 @@ namespace DSDecmpEx
             for (int i = 0; i < magic.Length && i < 4; i++)
             {
                 if ((magic[i] >= 'a' && magic[i] <= 'z') || (magic[i] >= 'A' && magic[i] <= 'Z')
-                    || char.IsDigit((char)magic[i]))
+                                                         || char.IsDigit((char)magic[i]))
                 {
                     ext += (char)magic[i];
                 }
                 else
                     break;
             }
+
             if (ext.Length <= 1)
                 return defaultExt;
             return ext;
         }
+
         #endregion
 
         /// <summary>
@@ -507,10 +556,11 @@ namespace DSDecmpEx
             if (Path.GetFullPath(sourcefile) == Path.GetFullPath(destfile))
                 return;
             File.Copy(sourcefile, destfile);
-            Console.WriteLine("Copied " + sourcefile + " to " + destfile);
+            Console.WriteLine($"Copied {sourcefile} to {destfile}");
         }
 
         #region Format sequence getters
+
         /// <summary>
         /// Gets the compression format corresponding to the given format string.
         /// </summary>
@@ -524,7 +574,8 @@ namespace DSDecmpEx
                     yield return fmt;
                     yield break;
                 }
-            Console.WriteLine("No such compression format: " + formatstring);
+
+            Console.WriteLine($"No such compression format: {formatstring}");
         }
 
         /// <summary>
@@ -558,6 +609,7 @@ namespace DSDecmpEx
                 yield return new CompositeNDSFormat();
             }
         }
+
         /// <summary>
         /// Gets a sequence over all formats that can be used from plugins.
         /// </summary>
@@ -565,16 +617,17 @@ namespace DSDecmpEx
         {
             string pluginPath = Directory.GetParent(Assembly.GetExecutingAssembly().Location).FullName;
             pluginPath = Path.Combine(pluginPath, PluginFolder);
-            if (System.IO.Directory.Exists(pluginPath))
+            if (Directory.Exists(pluginPath))
             {
                 foreach (CompressionFormat fmt in IOUtils.LoadCompressionPlugins(pluginPath))
                     yield return fmt;
             }
             else
             {
-                Console.WriteLine("Plugin folder " + pluginPath + " is not present; only built-in formats are supported.");
+                Console.WriteLine($"Plugin folder {pluginPath} is not present; only built-in formats are supported.");
             }
         }
+
         #endregion
     }
 }

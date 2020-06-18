@@ -1,8 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 
-namespace DSDecmp
+namespace DSDecmp.Exceptions
 {
     /// <summary>
     /// An exception indication that the input has more data than required in order
@@ -23,10 +21,9 @@ namespace DSDecmp
         /// <param name="readBytes">The number of bytes read by the decompressor.</param>
         /// <param name="totLength">The indicated length of the input stream.</param>
         public TooMuchInputException(long readBytes, long totLength)
-            : base("The input contains more data than necessary. Only used 0x" 
-            + readBytes.ToString("X") + " of 0x" + totLength.ToString("X") + " bytes")
+            : base($"The input contains more data than necessary. Only used 0x{readBytes:X} of 0x{totLength:X} bytes")
         {
-            this.ReadBytes = readBytes;
+            ReadBytes = readBytes;
         }
     }
 }

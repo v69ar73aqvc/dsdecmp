@@ -1,18 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
-using System.Reflection;
 using System.IO;
+using System.Reflection;
+using DSDecmp.Formats;
 
-namespace DSDecmp
+namespace DSDecmp.Utils
 {
     /// <summary>
     /// Class for I/O-related utility methods.
     /// </summary>
     public static class IOUtils
     {
-
         #region byte[] <-> (u)int
+
         /// <summary>
         /// Returns a 4-byte unsigned integer as used on the NDS converted from four bytes
         /// at a specified position in a byte array.
@@ -23,9 +23,9 @@ namespace DSDecmp
         public static uint ToNDSu32(byte[] buffer, int offset)
         {
             return (uint)(buffer[offset]
-                        | (buffer[offset + 1] << 8)
-                        | (buffer[offset + 2] << 16)
-                        | (buffer[offset + 3] << 24));
+                          | (buffer[offset + 1] << 8)
+                          | (buffer[offset + 2] << 16)
+                          | (buffer[offset + 3] << 24));
         }
 
         /// <summary>
@@ -37,10 +37,10 @@ namespace DSDecmp
         /// <returns>The indicated 4 bytes converted to int</returns>
         public static int ToNDSs32(byte[] buffer, int offset)
         {
-            return (int)(buffer[offset]
-                        | (buffer[offset + 1] << 8)
-                        | (buffer[offset + 2] << 16)
-                        | (buffer[offset + 3] << 24));
+            return buffer[offset]
+                   | (buffer[offset + 1] << 8)
+                   | (buffer[offset + 2] << 16)
+                   | (buffer[offset + 3] << 24);
         }
 
         /// <summary>
@@ -49,10 +49,9 @@ namespace DSDecmp
         /// </summary>
         public static byte[] FromNDSu32(uint value)
         {
-            return new byte[] {
-                (byte)(value & 0xFF),
-                (byte)((value >> 8) & 0xFF),
-                (byte)((value >> 16) & 0xFF),
+            return new[]
+            {
+                (byte)(value & 0xFF), (byte)((value >> 8) & 0xFF), (byte)((value >> 16) & 0xFF),
                 (byte)((value >> 24) & 0xFF)
             };
         }
@@ -66,13 +65,15 @@ namespace DSDecmp
         /// <returns>The indicated 3 bytes converted to an integer.</returns>
         public static int ToNDSu24(byte[] buffer, int offset)
         {
-            return (int)(buffer[offset]
-                        | (buffer[offset + 1] << 8)
-                        | (buffer[offset + 2] << 16));
+            return buffer[offset]
+                   | (buffer[offset + 1] << 8)
+                   | (buffer[offset + 2] << 16);
         }
+
         #endregion
 
         #region Plugin loading
+
         /// <summary>
         /// (Attempts to) load compression formats from the given file.
         /// </summary>
@@ -99,12 +100,13 @@ namespace DSDecmp
                 {
                     try
                     {
-                        newFormats.Add(Activator.CreateInstance(dllType) as CompressionFormat);
+                        newFormats.Add((CompressionFormat)Activator.CreateInstance(dllType));
                     }
                     catch (MissingMethodException)
                     {
                         if (printFailures)
-                            Console.WriteLine(dllType + " is a compression format, but does not have a parameterless constructor. Format cannot be loaded from " + fullPath + ".");
+                            Console.WriteLine(
+                                $"{dllType} is a compression format, but does not have a parameterless constructor. Format cannot be loaded from {fullPath}.");
                     }
                 }
             }
@@ -127,11 +129,15 @@ namespace DSDecmp
                 {
                     formats.AddRange(LoadCompressionPlugin(file, false));
                 }
-                catch (Exception) { }
+                catch (Exception)
+                {
+                    // ignored
+                }
             }
 
             return formats;
         }
+
         #endregion
 
         /// <summary>
